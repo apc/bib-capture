@@ -43,13 +43,10 @@ If nil, the user will be prompted."
 (defvar bib-capture-buffer-name "*Bib Capture*"
   "Name of the temporary buffer used for BibTeX editing.")
 
-(defvar bib--duplicate-marker nil
-  "Marker pointing to the location of a duplicate BibTeX entry.")
-
 (defvar bib-capture-last-stored-marker (make-marker)
   "Marker pointing to the entry most recently stored with `bib-capture'.")
 
-(defvar bib-capture-last-stored-entry nil
+(defvar bib-capture-last-stored nil
   "Cons cell consisting of the buffer and citation key for the last
 entry stored with `bib-capture'.")
 
@@ -73,13 +70,10 @@ entry stored with `bib-capture'.")
     (setq header-line-format
           '(:eval (concat
                    (propertize " " 'display '(space :align-to 0))
-                   (propertize "Press " 'face 'font-lock-comment-face)
-                   (propertize "C-c C-c" 'face 'help-key-binding)
-                   (propertize " to confirm, " 'face 'font-lock-comment-face)
-                   (propertize "C-c C-u" 'face 'help-key-binding)
-                   (propertize " to clean, or " 'face 'font-lock-comment-face)
-                   (propertize "C-c C-k" 'face 'help-key-binding)
-                   (propertize " to cancel." 'face 'font-lock-comment-face))))
+                   (substitute-command-keys
+    "\\<bib-capture-mode-map>Bib Capture buffer.  Finish \
+`\\[bib-capture-confirm]', update `\\[bib-capture-clean-entry]', \
+abort `\\[bib-capture-abort]'."))))
     (run-hooks 'bib-capture-mode-hook)))
 
 (defun bib--capture-get-key (entry)
@@ -103,37 +97,86 @@ entry stored with `bib-capture'.")
       (setq n (1+ n)))
     new-key))
 
+(defun bib-capture--entry-exists (key &optional show)
+  "Check if entry with KEY exists in `bib-capture-default-target’. Return nil otherwise.
+
+If a duplicate entry exists, this will return the position of the existing entry, as a marker. If optional argument SHOW is non-nil, the entry will be displayed in a temporary buffer."
+  (let ((target-file (expand-file-name bib-capture-default-target))
+        (dup-loc)
+        (existing-entry)
+        (bufname (format "*BibTeX Duplicate: %s*" key)))
+    (with-current-buffer (find-file-noselect target-file)
+      (when-let ((dup (bibtex-find-entry key)))
+        (let ((dup-marker (copy-marker dup)))
+          (setq existing-entry (save-excursion
+                                 (goto-char dup-marker)
+                                 (bibtex-beginning-of-entry)
+                                 (buffer-substring-no-properties
+                                  (point)
+                                  (progn (bibtex-end-of-entry) (point)))))
+          (setq dup-loc dup-marker))))
+    (if show
+          (when dup-loc
+            (with-current-buffer (get-buffer-create bufname)
+              (let ((inhibit-read-only t))
+                (erase-buffer)
+                (insert existing-entry)
+                (view-mode 1)
+                (bibtex-mode)))
+            (display-buffer bufname))
+      dup-loc)))
 
 (defun bib-capture-confirm (&optional new-key)
-  "Confirm the BibTeX entry and save it to `bib-capture-default-target'."
+  "Confirm the BibTeX entry and save it to `bib-capture-default-target'.
+
+If the key already exists, the user is prompted to auto-generate a new one,
+enter one manually, or abort (which will kill the current buffer)."
   (interactive "P")
-  (let ((entry (buffer-string))
-        (capture-buf (current-buffer))
-        (duplicate-found nil)
-        (target-file (expand-file-name bib-capture-default-target))
-        key)
-    (bibtex-clean-entry new-key)
-    (setq key (bib--capture-get-key entry))
-    (unless key
+  (bibtex-clean-entry new-key)
+  (let* ((capture-buf (current-buffer))
+         (target-file (expand-file-name bib-capture-default-target))
+         (entry (buffer-string))
+         (original-key (bib--capture-get-key entry))
+         (final-key original-key))
+
+    (unless original-key
       (user-error "Could not extract a citation key from the entry."))
+
+    ;; Loop until we get a unique key
+    (while (bib-capture--entry-exists final-key t)
+      (let* ((choice (read-multiple-choice
+                      (format "Key \"%s\" already exists. Choose an option: " final-key)
+                      '((?a auto "Auto-generate a new key")
+                        (?m manual "Manually enter a new key")
+                        (?q quit "Abort the capture")))))
+        (pcase (cadr choice)
+          ('auto
+           (setq final-key (bib--capture-uniquify-key final-key)))
+          ('manual
+           (setq final-key (read-string "Enter a new citation key: ")))
+          ('quit
+           (kill-buffer capture-buf)
+           (user-error "Aborted BibTeX capture due to duplicate key.")))))
+
+    ;; Replace key in entry if needed
+    (unless (equal final-key original-key)
+      (setq entry (replace-regexp-in-string
+                   (format "\\(@\\w+{\\s-*\\)%s" (regexp-quote original-key))
+                   (format "\\1%s" final-key)
+                   entry)))
+
+    ;; Insert entry
     (with-current-buffer (find-file-noselect target-file)
       (save-excursion
-        (if-let ((dup-loc (bibtex-find-entry key)))
-            (setq duplicate-found dup-loc)
-          (goto-char (point-max))
-          (unless (save-excursion (forward-line -1) (looking-at-p "^\\s-*$"))
-            (insert "\n"))
-          (insert entry "\n\n")
-          (bibtex-clean-entry)
-          (save-buffer)
-          (setq bib-capture-last-stored (cons target-file key))
-          (kill-buffer capture-buf))))
-    (when duplicate-found
-      (when (y-or-n-p (format "Duplicate key found: %s. Jump to it? " key))
-        (find-file-other-window target-file)
-        (goto-char duplicate-found)
-        (beginning-of-line)))))
-
+        (goto-char (point-max))
+        (unless (save-excursion (forward-line -1) (looking-at-p "^\\s-*$"))
+          (insert "\n"))
+        (insert entry "\n\n")
+        (bibtex-clean-entry)
+        (save-buffer))
+      (setq bib-capture-last-stored (cons target-file final-key))
+      (kill-buffer capture-buf)
+      (message "Inserted BibTeX entry with key: %s" final-key))))
 
 
 (defun bib-capture-abort ()
@@ -207,49 +250,30 @@ buffer after inserting."
     (when pos
       (cons buf pos))))
 
-(defun bib-capture--validate-stored-entry ()
-  (let* ((entry bib-capture-last-stored-entry)
-         (buf (car entry))
-         (key (cdr entry)))
-    (unless buf
-      (user-error "There is no "))
 
-    )
-  (save-window-excursion (switch-to-buffer)))
+(defun bib-capture-goto-last-stored (&optional noshow)
+  "Go to the last BibTeX entry inserted by `bib-capture-confirm`.
 
-(defun bib-capture-goto-last-stored (&optional silent)
-  "Jump to the last BibTeX entry stored via `bib-capture-confirm`. Uses the information stored in `bib-capture-last-stored-entry'."
-  (interactive)
-  (let ((marker (and bib-capture-last-stored-marker
-                     (marker-buffer bib-capture-last-stored-marker)
-                     (buffer-live-p (marker-buffer bib-capture-last-stored-marker))
-                     bib-capture-last-stored-marker))
-        (key bib-capture-last-stored-key))
-    (cond
-     (marker
-      (switch-to-buffer (marker-buffer marker))
-      (goto-char marker)
-      (bibtex-reposition-window)
-      (unless silent
-        (message "Jumped to last BibTeX capture: %s" key))
-      (when silent key))
+If NOSHOW is non-nil (e.g., called with `C-u` or from Lisp), return a marker
+to the entry location instead of jumping to it."
+  (interactive "P")
+  (unless (and (boundp 'bib-capture-last-stored) bib-capture-last-stored)
+    (user-error "No previous BibTeX entry location recorded."))
 
-     ((and key
-           (let ((result (bib-capture--search-entry-with-buffer key t nil t)))
-             (when result
-               (let ((buf (car result))
-                     (pos (cdr result)))
-                 (setq marker (set-marker (make-marker) pos buf))
-                 (setq bib-capture-last-stored-marker marker)
-                 (switch-to-buffer buf)
-                 (goto-char pos)
-                 (bibtex-reposition-window)
-                 (unless silent
-                   (message "Located last BibTeX capture by key: %s" key))
-                 (when silent key))))))
+  (let* ((file (car bib-capture-last-stored))
+         (key (cdr bib-capture-last-stored)))
+    (unless (file-exists-p file)
+      (user-error "File does not exist: %s" file))
+    (let ((buf (find-file-noselect file)))
+      (with-current-buffer buf
+        (if-let ((loc (bibtex-search-entry key)))
+            (if noshow
+                (point-marker)
+              (pop-to-buffer buf)  ;; ensures buffer is displayed
+              (goto-char loc))
+          (user-error "Entry with key '%s' not found in %s" key file))))))
 
-     ((not silent)
-      (message "No BibTeX capture history available.")))))
+
 
 
 
@@ -335,8 +359,11 @@ prompting the user for confirmation."
 
 FILE and NOCONFIRM are as in `bib-capture-add-to-library', which see."
   (interactive)
-  (when-let ((key (save-window-excursion (bib-capture-goto-last-stored 'silent))))
-    (bib-capture-add-to-library key)))
+  (let ((key (cdr bib-capture-last-stored))
+        (file (car bib-capture-last-stored)))
+    (if (bib-capture--entry-exists key)
+        (bib-capture-add-to-library key)
+      (user-error "There is no entry for %s in %s" key file))))
 
 (provide 'bib-capture)
 ;;; bib-capture.el ends here
