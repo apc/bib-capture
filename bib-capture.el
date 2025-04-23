@@ -29,14 +29,15 @@
   :type 'file)
 
 (defcustom bib-capture-default-file-provider nil
-  "Function or value used to provide a default file path for `bib-capture-add-to-library`.
+  "Function or value used to provide a default file path for
+`bib-capture-add-to-library`.
 
-If this is a function, it should return a string (the path to the file).
-If it's a string, it is used directly as the path.
-If nil, the user will be prompted."
+If this is a function, it should return a string (the path to the
+file). If it's a string, it is used directly as the path. If nil,
+the user will be prompted."
   :type '(choice (const :tag "None" nil)
                  (function :tag "Function returning a file path")
-                 (string :tag "Static file path"))
+                 (string :tag "File path"))
   :group 'bib-capture)
 
 
@@ -44,7 +45,8 @@ If nil, the user will be prompted."
   "Name of the temporary buffer used for BibTeX editing.")
 
 (defvar bib-capture-last-stored-marker (make-marker)
-  "Marker pointing to the entry most recently stored with `bib-capture'.")
+  "Marker pointing to the entry most recently stored with
+`bib-capture'.")
 
 (defvar bib-capture-last-stored nil
   "Cons cell consisting of the buffer and citation key for the last
@@ -98,9 +100,12 @@ abort `\\[bib-capture-abort]'."))))
     new-key))
 
 (defun bib-capture--entry-exists (key &optional show)
-  "Check if entry with KEY exists in `bib-capture-default-target’. Return nil otherwise.
+  "Check if entry with KEY exists in `bib-capture-default-target’.
+Return nil otherwise.
 
-If a duplicate entry exists, this will return the position of the existing entry, as a marker. If optional argument SHOW is non-nil, the entry will be displayed in a temporary buffer."
+If a duplicate entry exists, this will return the position of the
+existing entry, as a marker. If optional argument SHOW is
+non-nil, the entry will be displayed in a temporary buffer."
   (let ((target-file (expand-file-name bib-capture-default-target))
         (dup-loc)
         (existing-entry)
@@ -146,15 +151,15 @@ enter one manually, or abort (which will kill the current buffer)."
     (while (bib-capture--entry-exists final-key t)
       (let* ((choice (read-multiple-choice
                       (format "Key \"%s\" already exists. Choose an option: " final-key)
-                      '((?a auto "Auto-generate a new key")
-                        (?m manual "Manually enter a new key")
-                        (?q quit "Abort the capture")))))
-        (pcase (cadr choice)
-          ('auto
+                      '((?a "auto" "Auto-generate a new key")
+                        (?m "manual" "Manually enter a new key")
+                        (?q "quit" "Abort the capture")))))
+        (pcase choice
+          (?a
            (setq final-key (bib--capture-uniquify-key final-key)))
-          ('manual
+          (?m
            (setq final-key (read-string "Enter a new citation key: ")))
-          ('quit
+          (?q
            (kill-buffer capture-buf)
            (user-error "Aborted BibTeX capture due to duplicate key.")))))
 
@@ -175,7 +180,10 @@ enter one manually, or abort (which will kill the current buffer)."
         (bibtex-clean-entry)
         (save-buffer))
       (setq bib-capture-last-stored (cons target-file final-key))
-      (kill-buffer capture-buf)
+      (if-let (win (get-buffer-window capture-buf))
+        (with-selected-window win
+          (kill-buffer-and-window))
+      (kill-buffer capture-buf))
       (message "Inserted BibTeX entry with key: %s" final-key))))
 
 
@@ -183,7 +191,12 @@ enter one manually, or abort (which will kill the current buffer)."
   "Cancel BibTeX entry editing without saving."
   (interactive)
   (message "Bib capture canceled.")
-  (kill-buffer))
+  (let* ((capture-buf (current-buffer))
+         (win (get-buffer-window capture-buf)))
+    (if win
+        (with-selected-window win
+          (kill-buffer-and-window))
+      (kill-buffer capture-buf))))
 
 (defun bib-capture-clean-entry ()
   "Call `bibtex-clean-entry' with a non-nil NEW-KEY argument."
@@ -274,11 +287,6 @@ to the entry location instead of jumping to it."
           (user-error "Entry with key '%s' not found in %s" key file))))))
 
 
-
-
-
-
-
 (defun bib-capture--suppress-parse-messages-once (orig-fun &rest args)
   "Temporarily silence messages from `bibtex-parse-keys` once."
   (let ((inhibit-message t))
@@ -298,7 +306,8 @@ to the entry location instead of jumping to it."
 
 ;;;###autoload
 (defun bib-capture (doi)
-  "Insert BibTeX for DOI into a temporary buffer, or run `bibtex-entry` if called with prefix arg."
+  "Insert BibTeX for DOI into a temporary buffer, or run
+`bibtex-entry` if called with prefix arg."
   (interactive
    (if current-prefix-arg
        (list nil)  ;; No prompt — manual entry
@@ -321,7 +330,7 @@ to the entry location instead of jumping to it."
       (call-interactively #'bibtex-entry))))
 
 ;;;###autoload
-(defun bib-capture-add-to-library (citekey &optional file noconfirm)
+(defun bib-capture-add-file (citekey &optional file noconfirm)
   "Add a file to the library for CITEKEY.
 
 Uses FILE if provided, otherwise uses `bib-capture-default-file-provider`
@@ -336,7 +345,7 @@ prompting the user for confirmation."
         (cond
          (file file)
          ((and default-path noconfirm) default-path)
-         (t (read-file-name "Add file: "
+         (t (read-file-name (format "Add file for %s: " citekey)
                 (file-name-directory default-path)
                 nil t
                 (file-name-nondirectory default-path))))))
@@ -348,7 +357,7 @@ prompting the user for confirmation."
       (let ((source-plist
              (list :write-file
                    (lambda (destfile ok-if-already-exists)
-                     (copy-file filepath destfile ok-if-already-exists))
+                     (rename-file filepath destfile ok-if-already-exists))
                    :extension ext)))
         (citar-save-file-to-library citekey source-plist)
         (message "Saved %s as a resource for %s" filepath citekey)))))
@@ -359,10 +368,9 @@ prompting the user for confirmation."
 
 FILE and NOCONFIRM are as in `bib-capture-add-to-library', which see."
   (interactive)
-  (let ((key (cdr bib-capture-last-stored))
-        (file (car bib-capture-last-stored)))
+  (let ((key (cdr bib-capture-last-stored)))
     (if (bib-capture--entry-exists key)
-        (bib-capture-add-to-library key)
+        (bib-capture-add-file key file noconfirm)
       (user-error "There is no entry for %s in %s" key file))))
 
 (provide 'bib-capture)
