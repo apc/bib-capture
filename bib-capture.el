@@ -78,7 +78,7 @@ entry stored with `bib-capture'.")
 abort `\\[bib-capture-abort]'."))))
     (run-hooks 'bib-capture-mode-hook)))
 
-(defun bib--capture-get-key (entry)
+(defun bib-capture--get-key (entry)
   "Extract the BibTeX entry key from the ENTRY string."
   (when (string-match "@[A-Za-z]+[{(][[:space:]]*\\([^,\n]+\\)" entry)
     (substring-no-properties (match-string 1 entry))))
@@ -99,6 +99,9 @@ abort `\\[bib-capture-abort]'."))))
       (setq n (1+ n)))
     new-key))
 
+(defun bib-capture--dup-buf (key)
+  (format "*BibTeX Duplicate: %s*" key))
+
 (defun bib-capture--entry-exists (key &optional show)
   "Check if entry with KEY exists in `bib-capture-default-target’.
 Return nil otherwise.
@@ -109,7 +112,7 @@ non-nil, the entry will be displayed in a temporary buffer."
   (let ((target-file (expand-file-name bib-capture-default-target))
         (dup-loc)
         (existing-entry)
-        (bufname (format "*BibTeX Duplicate: %s*" key)))
+        (bufname (bib-capture--dup-buf key)))
     (with-current-buffer (find-file-noselect target-file)
       (when-let ((dup (bibtex-find-entry key)))
         (let ((dup-marker (copy-marker dup)))
@@ -121,14 +124,15 @@ non-nil, the entry will be displayed in a temporary buffer."
                                   (progn (bibtex-end-of-entry) (point)))))
           (setq dup-loc dup-marker))))
     (if show
-          (when dup-loc
-            (with-current-buffer (get-buffer-create bufname)
+        (when dup-loc
+          (with-current-buffer (get-buffer-create bufname)
               (let ((inhibit-read-only t))
                 (erase-buffer)
                 (insert existing-entry)
                 (view-mode 1)
-                (bibtex-mode)))
-            (display-buffer bufname))
+                (bibtex-mode)
+                (setq header-line-format "Test")))
+          (display-buffer bufname))
       dup-loc)))
 
 (defun bib-capture-confirm (&optional new-key)
@@ -141,7 +145,7 @@ enter one manually, or abort (which will kill the current buffer)."
   (let* ((capture-buf (current-buffer))
          (target-file (expand-file-name bib-capture-default-target))
          (entry (buffer-string))
-         (original-key (bib--capture-get-key entry))
+         (original-key (bib-capture--get-key entry))
          (final-key original-key))
 
     (unless original-key
@@ -149,12 +153,16 @@ enter one manually, or abort (which will kill the current buffer)."
 
     ;; Loop until we get a unique key
     (while (bib-capture--entry-exists final-key t)
-      (let* ((choice (read-multiple-choice
-                      (format "Key \"%s\" already exists. Choose an option: " final-key)
-                      '((?a "auto" "Auto-generate a new key")
-                        (?m "manual" "Manually enter a new key")
-                        (?q "quit" "Abort the capture")))))
-        (pcase choice
+      (let ((dup-buf (get-buffer (bib-capture--dup-buf final-key)))
+            (choice (read-multiple-choice
+                     (format "Key \"%s\" already exists. Choose an option: " final-key)
+                     '((?a "auto" "Auto-generate a new key")
+                       (?m "manual" "Manually enter a new key")
+                       (?q "quit" "Abort the capture")))))
+        (when (buffer-live-p dup-buf)
+          (kill-buffer dup-buf)) ; Kill duplicate buffer once
+
+        (pcase (car choice)
           (?a
            (setq final-key (bib--capture-uniquify-key final-key)))
           (?m
@@ -181,10 +189,12 @@ enter one manually, or abort (which will kill the current buffer)."
         (save-buffer))
       (setq bib-capture-last-stored (cons target-file final-key))
       (if-let (win (get-buffer-window capture-buf))
-        (with-selected-window win
-          (kill-buffer-and-window))
-      (kill-buffer capture-buf))
+          (with-selected-window win
+            (kill-buffer-and-window))
+        (kill-buffer capture-buf))
       (message "Inserted BibTeX entry with key: %s" final-key))))
+
+
 
 
 (defun bib-capture-abort ()
