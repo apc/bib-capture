@@ -1,0 +1,40 @@
+* Bib-capture
+
+This is a small, rather unsophisticated library for capturing bib entries to a specified location. It is effectively a poor man’s version of =org-capture= for =.bib= files.
+
+The main entry point is the function =bib-capture= which will prompt for a DOI and populate a capture buffer by passing the DOI to =biblio-doi-insert-bibtex= and letting that function to the heavy lifting. If the DOI string is empty, or if =bib-capture= is called with a prefix argument, the capture buffer will be populated interactively, after calling ‘bibtex-entry’.
+
+In order to make use of this, it is important to identify a main target file, and set the variable =bib-capture-default-target=.
+
+In conjunction with ~citar~, this library can be used to also add files to a library, using whatever conventions the user has instructed ~citar~ to use for matching BibTeX entries to files. The main command for this, =bib-capture-add-file-to-last-capture=, will prompt the user to select a file (using =bib-capture-source-dir=, if set, as the default location,) and then rely on =citar= to do the heavy lifting.
+
+Optionally, if =bib-capture-default-file-provider= is set to a function that generates a path to a file, the user can call =bib-capture-add-file-to-last-capture= with a prefix argument and have that file be added to the last captured entry directly. For example, the following can be used to define helper function will return the path to the latest file added to a particular directory (e.g. =~/Downloads/=):
+
+#+begin_src elisp
+(use-package f
+  :demand t
+  :preface
+  (defun +f-latest-file (path)
+    "Return the most recently modified file (not dir) in PATH.
+
+Adapted from https://stackoverflow.com/a/30886283"
+    (let ((files (cl-remove-if
+                  (lambda (f)
+                    (or (file-directory-p f)
+                        (string-match-p "\\.DS_Store\\'" (file-name-nondirectory f))))
+                  (f-entries path))))
+      (car (sort files
+                 (lambda (a b)
+                   (not (time-less-p (+f--mtime a) (+f--mtime b))))))))
+
+(defun +f--mtime (f)
+  "Return the modification time of file F.
+
+Adapted from `https://stackoverflow.com/a/30886283’."
+  (nth 5 (file-attributes f)))
+
+(defun +f-latest-download ()
+  "Return most recently modified file in \'~/Downloads/\'."
+  (interactive)
+  (+f-latest-file (expand-file-name "~/Downloads/"))))
+#+end_src
