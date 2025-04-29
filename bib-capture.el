@@ -80,6 +80,7 @@ abort `\\[bib-capture-abort]'."))))
 
 (defun bib-capture--get-key (entry)
   "Extract the BibTeX entry key from the ENTRY string."
+  ;; TODO Might it be best to make use of `bibtex-parse-entry’ here?
   (when (string-match "@[A-Za-z]+[{(][[:space:]]*\\([^,\n]+\\)" entry)
     (substring-no-properties (match-string 1 entry))))
 
@@ -100,6 +101,7 @@ abort `\\[bib-capture-abort]'."))))
     new-key))
 
 (defun bib-capture--dup-buf (key)
+  "Return canonical name for buffer displaying existing entry with KEY."
   (format "*BibTeX Duplicate: %s*" key))
 
 (defun bib-capture--entry-exists (key &optional show)
@@ -193,9 +195,6 @@ enter one manually, or abort (which will kill the current buffer)."
             (kill-buffer-and-window))
         (kill-buffer capture-buf))
       (message "Inserted BibTeX entry with key: %s" final-key))))
-
-
-
 
 (defun bib-capture-abort ()
   "Cancel BibTeX entry editing without saving."
