@@ -21,7 +21,7 @@
   :group 'bibtex)
 
 (defcustom bib-capture-default-target nil
-  "Default target file for bib-capture entries."
+  "Default target file for `bib-capture’ entries."
   :type 'file)
 
 (defcustom bib-capture-source-dir nil
@@ -29,8 +29,8 @@
   :type 'file)
 
 (defcustom bib-capture-default-file-provider nil
-  "Function or value used to provide a default file path for
-`bib-capture-add-to-library`.
+  "A Function or value that `bib-capture-add-to-library' will use to
+find files to add to library.
 
 If this is a function, it should return a string (the path to the
 file). If it's a string, it is used directly as the path. If nil,
@@ -141,7 +141,9 @@ non-nil, the entry will be displayed in a temporary buffer."
   "Confirm the BibTeX entry and save it to `bib-capture-default-target'.
 
 If the key already exists, the user is prompted to auto-generate a new one,
-enter one manually, or abort (which will kill the current buffer)."
+enter one manually, or abort (which will kill the current buffer).
+
+If optional argument NEW-KEY is non-nil, a new key will be generated."
   (interactive "P")
   (bibtex-clean-entry new-key)
   (let* ((capture-buf (current-buffer))
@@ -151,7 +153,7 @@ enter one manually, or abort (which will kill the current buffer)."
          (final-key original-key))
 
     (unless original-key
-      (user-error "Could not extract a citation key from the entry."))
+      (user-error "Could not extract a citation key from the entry"))
 
     ;; Loop until we get a unique key
     (while (bib-capture--entry-exists final-key t)
@@ -171,7 +173,7 @@ enter one manually, or abort (which will kill the current buffer)."
            (setq final-key (read-string "Enter a new citation key: ")))
           (?q
            (kill-buffer capture-buf)
-           (user-error "Aborted BibTeX capture due to duplicate key.")))))
+           (user-error "Aborted BibTeX capture due to duplicate key")))))
 
     ;; Replace key in entry if needed
     (unless (equal final-key original-key)
@@ -213,8 +215,9 @@ enter one manually, or abort (which will kill the current buffer)."
   (bibtex-clean-entry t))
 
 (defun bib-capture---biblio-doi--insert-advice (orig-fn bibtex target-buffer)
-  "Advice for `biblio-doi--insert` to move point to the beginning of
-buffer after inserting."
+  "Advice for `biblio-doi--insert`: after calling ORIG-FN with args
+BIBTEX and TARGET-BUFFER, move point to the beginning of
+buffer."
   (unwind-protect
       (progn
         (funcall orig-fn bibtex target-buffer)
@@ -240,7 +243,10 @@ buffer after inserting."
      (t nil))))
 
 (defun bib-capture--search-entry-with-buffer (key &optional global start display)
-  "Like `bibtex-search-entry` but returns (BUFFER . POSITION)."
+  "Like `bibtex-search-entry’ but return (BUFFER . POSITION).
+
+Arguments KEY, GLOBAL, START, and DISPLAY are as in
+`bibtex-search-entry’, which see."
   (let ((pos nil)
         (buf nil))
     (if (and global bibtex-files)
@@ -280,7 +286,7 @@ If NOSHOW is non-nil (e.g., called with `C-u` or from Lisp), return a marker
 to the entry location instead of jumping to it."
   (interactive "P")
   (unless (and (boundp 'bib-capture-last-stored) bib-capture-last-stored)
-    (user-error "No previous BibTeX entry location recorded."))
+    (user-error "No previous BibTeX entry location recorded"))
 
   (let* ((file (car bib-capture-last-stored))
          (key (cdr bib-capture-last-stored)))
@@ -297,7 +303,8 @@ to the entry location instead of jumping to it."
 
 
 (defun bib-capture--suppress-parse-messages-once (orig-fun &rest args)
-  "Temporarily silence messages from `bibtex-parse-keys` once."
+  "Temporarily silence messages from `bibtex-parse-keys` when
+calling ORIG-FUN with ARGS."
   (let ((inhibit-message t))
     (unwind-protect
         (apply orig-fun args)
@@ -305,6 +312,10 @@ to the entry location instead of jumping to it."
                      #'bib-capture--suppress-parse-messages-once))))
 
 (defun bib-capture--use-temp-key-advice (orig-fun &rest args)
+  "Advise `bibtex-read-key’ to use a temporary key rather than
+prompting the user, before calling ORIG-FUN with ARGS.
+
+The advice is self-removing."
   (cl-letf (((symbol-function 'bibtex-read-key)
              (lambda (&rest _)
                (format "tmpkey-%s" (substring (md5 (number-to-string (float-time))) 0 8)))))
