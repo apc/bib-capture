@@ -55,6 +55,9 @@ entry stored with `bib-capture'.")
 (defvar bib-capture-mode-hook nil
   "Hooks to be run after setting up the capture buffer.")
 
+(defvar bib-capture-dup-buffer-hook nil
+  "Hooks to be run after displaying a duplicate entry buffer.")
+
 (defvar bib-capture-mode-map
   (let ((map (make-sparse-keymap)))
     (define-key map (kbd "C-c C-c") #'bib-capture-confirm)
@@ -133,7 +136,8 @@ non-nil, the entry will be displayed in a temporary buffer."
                 (insert existing-entry)
                 (view-mode 1)
                 (bibtex-mode)
-                (setq header-line-format "Test")))
+                (setq header-line-format (format "Existing entry with key %s at %s" key dup-loc)))
+                (run-hooks 'bib-capture-dup-buffer-hook))
           (display-buffer bufname))
       dup-loc)))
 
