@@ -141,11 +141,19 @@ non-nil, the entry will be displayed in a temporary buffer."
           (display-buffer bufname))
       dup-loc)))
 
+(defun bib-capture--clean-blank-lines ()
+  "Replace sequences of more than one blank line with a single blank line."
+  (save-excursion
+    (goto-char (point-min))
+    (while (re-search-forward "\n\\(\n\\)+" nil t)
+      (replace-match "\n\n"))))
+
 (defun bib-capture-confirm (&optional new-key)
   "Confirm the BibTeX entry and save it to `bib-capture-default-target'.
 
 If the key already exists, the user is prompted to auto-generate a new one,
-enter one manually, or abort (which will kill the current buffer).
+enter one manually, replace the existing entry, or abort (which will kill
+the current buffer).
 
 If optional argument NEW-KEY is non-nil, a new key will be generated."
   (interactive "P")
@@ -159,40 +167,59 @@ If optional argument NEW-KEY is non-nil, a new key will be generated."
     (unless original-key
       (user-error "Could not extract a citation key from the entry"))
 
-    ;; Loop until we get a unique key
-    (while (bib-capture--entry-exists final-key t)
-      (let ((dup-buf (get-buffer (bib-capture--dup-buf final-key)))
-            (choice (read-multiple-choice
-                     (format "Key \"%s\" already exists. Choose an option: " final-key)
-                     '((?a "auto" "Auto-generate a new key")
-                       (?m "manual" "Manually enter a new key")
-                       (?q "quit" "Abort the capture")))))
-        (when (buffer-live-p dup-buf)
-          (kill-buffer dup-buf)) ; Kill duplicate buffer once
+    ;; Loop until we get a unique key or decide to replace
+    (let ((replace-entry nil))
+      (while (and (not replace-entry)
+                  (bib-capture--entry-exists final-key t))
+        (let ((dup-buf (get-buffer (bib-capture--dup-buf final-key)))
+              (choice (read-multiple-choice
+                       (format "Key \"%s\" already exists. Choose an option: " final-key)
+                       '((?a "auto" "Auto-generate a new key")
+                         (?m "manual" "Manually enter a new key")
+                         (?r "replace" "Replace the existing entry")
+                         (?q "quit" "Abort the capture")))))
+          (when (buffer-live-p dup-buf)
+            (kill-buffer dup-buf)) ; Kill duplicate buffer once
 
-        (pcase (car choice)
-          (?a
-           (setq final-key (bib--capture-uniquify-key final-key)))
-          (?m
-           (setq final-key (read-string "Enter a new citation key: ")))
-          (?q
-           (kill-buffer capture-buf)
-           (user-error "Aborted BibTeX capture due to duplicate key")))))
+          (pcase (car choice)
+            (?a
+             (setq final-key (bib--capture-uniquify-key final-key)))
+            (?m
+             (setq final-key (read-string "Enter a new citation key: ")))
+            (?r
+             (setq replace-entry t))
+            (?q
+             (kill-buffer capture-buf)
+             (user-error "Aborted BibTeX capture due to duplicate key")))))
 
-    ;; Replace key in entry if needed
-    (unless (equal final-key original-key)
-      (setq entry (replace-regexp-in-string
-                   (format "\\(@\\w+{\\s-*\\)%s" (regexp-quote original-key))
-                   (format "\\1%s" final-key)
-                   entry)))
+      ;; Replace key in entry if needed
+      (unless (equal final-key original-key)
+        (setq entry (replace-regexp-in-string
+                     (format "\\(@\\w+{\\s-*\\)%s" (regexp-quote original-key))
+                     (format "\\1%s" final-key)
+                     entry)))
 
-    ;; Insert entry
-    (with-current-buffer (find-file-noselect target-file)
-      (save-excursion
-        (goto-char (point-max))
-        (unless (save-excursion (forward-line -1) (looking-at-p "^\\s-*$"))
-          (insert "\n"))
-        (insert entry "\n\n")
+      ;; Insert or replace entry
+      (with-current-buffer (find-file-noselect target-file)
+        (save-excursion
+          (if replace-entry
+              (progn
+                ;; Find and replace the existing entry
+                (goto-char (point-min))
+                (when (bibtex-search-entry final-key)
+                  (bibtex-beginning-of-entry)
+                  (let ((entry-start (point)))
+                    (bibtex-end-of-entry)
+                    (delete-region entry-start (point))
+                    (insert entry)
+                    ;; Clean up surrounding blank lines after replacement
+                    (bib-capture--clean-blank-lines))))
+            ;; Insert new entry at the end
+            (goto-char (point-max))
+            (unless (save-excursion (forward-line -1) (looking-at-p "^\\s-*$"))
+              (insert "\n"))
+            (insert entry "\n\n")))
+
         (bibtex-clean-entry)
         (save-buffer))
       (setq bib-capture-last-stored (cons target-file final-key))
@@ -200,7 +227,9 @@ If optional argument NEW-KEY is non-nil, a new key will be generated."
           (with-selected-window win
             (kill-buffer-and-window))
         (kill-buffer capture-buf))
-      (message "Inserted BibTeX entry with key: %s" final-key))))
+      (message "%s BibTeX entry with key: %s"
+               (if replace-entry "Replaced" "Inserted")
+               final-key))))
 
 (defun bib-capture-abort ()
   "Cancel BibTeX entry editing without saving."
