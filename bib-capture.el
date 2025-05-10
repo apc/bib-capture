@@ -143,6 +143,7 @@ non-nil, the entry will be displayed in a temporary buffer."
 
 (defun bib-capture--clean-blank-lines ()
   "Replace sequences of more than one blank line with a single blank line."
+  (interactive)
   (save-excursion
     (goto-char (point-min))
     (while (re-search-forward "\n\\(\n\\)+" nil t)
@@ -171,15 +172,12 @@ If optional argument NEW-KEY is non-nil, a new key will be generated."
     (let ((replace-entry nil))
       (while (and (not replace-entry)
                   (bib-capture--entry-exists final-key t))
-        (let ((dup-buf (get-buffer (bib-capture--dup-buf final-key)))
-              (choice (read-multiple-choice
+        (let ((choice (read-multiple-choice
                        (format "Key \"%s\" already exists. Choose an option: " final-key)
                        '((?a "auto" "Auto-generate a new key")
                          (?m "manual" "Manually enter a new key")
                          (?r "replace" "Replace the existing entry")
                          (?q "quit" "Abort the capture")))))
-          (when (buffer-live-p dup-buf)
-            (kill-buffer dup-buf)) ; Kill duplicate buffer once
 
           (pcase (car choice)
             (?a
