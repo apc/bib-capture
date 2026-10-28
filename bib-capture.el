@@ -107,17 +107,18 @@ abort `\\[bib-capture-abort]'."))))
   "Return canonical name for buffer displaying existing entry with KEY."
   (format "*BibTeX Duplicate: %s*" key))
 
-(defun bib-capture--entry-exists (key &optional show)
+(defun bib-capture--entry-exists (key &optional show file)
   "Check if entry with KEY exists in `bib-capture-default-target’.
 Return nil otherwise.
 
 If a duplicate entry exists, this will return the position of the
 existing entry, as a marker. If optional argument SHOW is
 non-nil, the entry will be displayed in a temporary buffer."
-  (let ((target-file (expand-file-name bib-capture-default-target))
-        (dup-loc)
-        (existing-entry)
-        (bufname (bib-capture--dup-buf key)))
+  (let* ((file (or file bib-capture-default-target))
+         (target-file (expand-file-name file))
+         (dup-loc)
+         (existing-entry)
+         (bufname (bib-capture--dup-buf key)))
     (with-current-buffer (find-file-noselect target-file)
       (when-let ((dup (bibtex-find-entry key)))
         (let ((dup-marker (copy-marker dup)))
@@ -394,19 +395,23 @@ returns an existing file, a non-nil value of NOCONFIRM will avoid
 prompting the user for confirmation."
   (interactive (list (citar-select-ref)))
   (let* ((default-path (bib-capture--resolve-default-file))
-       (filepath
-        (cond
-         (file file)
-         ((and default-path noconfirm) default-path)
-         (t (read-file-name (format "Add file for %s: " citekey)
-                (file-name-directory default-path)
-                nil t
-                (file-name-nondirectory default-path))))))
+         (filepath
+          (cond
+           (file file)
+           ((and default-path noconfirm) default-path)
+           (t (read-file-name (format "Add file for %s: " citekey)
+                              (file-name-directory default-path)
+                              nil t
+                              (file-name-nondirectory default-path))))))
     (unless (and citekey (file-exists-p filepath))
       (user-error "Missing citekey or file does not exist: %s" filepath))
     (let ((ext (file-name-extension filepath)))
       (unless ext
         (user-error "Cannot determine file extension for: %s" filepath))
+      ;; Confirm non-PDF files
+      (when (and (not (string= (downcase ext) "pdf"))
+                 (not (y-or-n-p (format "Add non-PDF file to %s? " citekey))))
+        (user-error "Operation cancelled"))
       (let ((source-plist
              (list :write-file
                    (lambda (destfile ok-if-already-exists)
